@@ -1,6 +1,6 @@
 """
-AI Code Assistant — Streamlit App (Production Ready)
-Stack: CodeBERT + FAISS + Lightweight LLM (Phi-2)
+AI Code Assistant — Streamlit App (Stable Version)
+Stack: CodeBERT + FAISS + FLAN-T5 (Lightweight)
 """
 
 import streamlit as st
@@ -9,10 +9,10 @@ import faiss
 import pickle
 import numpy as np
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModel
 
 # ── CONFIG ─────────────────────────────────────────────
-MODEL_NAME = "microsoft/phi-2"  # ✅ Streamlit-safe model
+MODEL_NAME = "google/flan-t5-base"  # ✅ lightweight & fast
 
 st.set_page_config(page_title="AI Code Assistant", page_icon="🤖", layout="wide")
 
@@ -22,8 +22,8 @@ for k, v in dict(
     history=[],
     cb_tok=None,
     cb_mod=None,
-    ds_tok=None,
-    ds_mod=None,
+    llm_tok=None,
+    llm_mod=None,
     faiss_idx=None,
     metadata=None
 ).items():
@@ -41,7 +41,7 @@ def load_codebert():
 @st.cache_resource
 def load_llm():
     tok = AutoTokenizer.from_pretrained(MODEL_NAME)
-    mod = AutoModelForCausalLM.from_pretrained(MODEL_NAME)
+    mod = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
     mod.eval()
     return tok, mod
 
@@ -89,7 +89,7 @@ You are a helpful coding assistant.
 Context:
 {context}
 
-User Question:
+Question:
 {query}
 
 Answer:
@@ -99,30 +99,23 @@ Answer:
 
     with torch.no_grad():
         outputs = mod.generate(
-            **inputs,
-            max_new_tokens=150,
-            do_sample=True,
-            temperature=0.3,
-            top_p=0.9
+            input_ids=inputs["input_ids"],
+            max_new_tokens=150
         )
 
-    text = tok.decode(outputs[0], skip_special_tokens=True)
-
-    # Remove prompt from output
-    text = text[len(prompt):].strip()
-
-    return text
+    answer = tok.decode(outputs[0], skip_special_tokens=True)
+    return answer.strip()
 
 # ── UI ────────────────────────────────────────────────
 st.title("🤖 AI Code Assistant")
-st.markdown("### CodeBERT + FAISS + Lightweight LLM (Phi-2)")
+st.markdown("### CodeBERT + FAISS + FLAN-T5 (Fast & Stable)")
 
 # Load models
 if not st.session_state.loaded:
     if st.button("🚀 Load Models"):
         with st.spinner("Loading models..."):
             st.session_state.cb_tok, st.session_state.cb_mod = load_codebert()
-            st.session_state.ds_tok, st.session_state.ds_mod = load_llm()
+            st.session_state.llm_tok, st.session_state.llm_mod = load_llm()
             st.session_state.faiss_idx, st.session_state.metadata = load_faiss()
             st.session_state.loaded = True
         st.success("Models loaded!")
@@ -151,8 +144,8 @@ if st.button("⚡ Generate Answer"):
             answer = generate(
                 query,
                 snippets,
-                st.session_state.ds_tok,
-                st.session_state.ds_mod
+                st.session_state.llm_tok,
+                st.session_state.llm_mod
             )
 
         st.markdown("## ✅ Answer")
