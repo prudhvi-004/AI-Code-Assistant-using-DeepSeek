@@ -6,3 +6,5 @@ faiss-cpu
 einops
 numpy==1.26.4
 huggingface_hub
+
+
