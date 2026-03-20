@@ -1,7 +1,6 @@
+streamlit
 transformers==4.51.3
 torch>=2.9.0
-accelerate
 faiss-cpu
-einops
 numpy==1.26.4
-huggingface_hub
+openai
