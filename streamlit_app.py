@@ -1,29 +1,24 @@
-"""
-AI Code Assistant — Streamlit App (Stable Version)
-Stack: CodeBERT + FAISS + FLAN-T5 (Lightweight)
-"""
-
 import streamlit as st
 import torch
 import faiss
 import pickle
 import numpy as np
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, AutoModel
+from transformers import AutoTokenizer, AutoModel
+from openai import OpenAI
 
 # ── CONFIG ─────────────────────────────────────────────
-MODEL_NAME = "google/flan-t5-base"  # ✅ lightweight & fast
+client = OpenAI(
+    api_key=st.secrets["OPENROUTER_API_KEY"],
+    base_url="https://openrouter.ai/api/v1"
+)
 
-st.set_page_config(page_title="AI Code Assistant", page_icon="🤖", layout="wide")
-
-# ── SESSION STATE ──────────────────────────────────────
+# ── SESSION ────────────────────────────────────────────
 for k, v in dict(
     loaded=False,
     history=[],
     cb_tok=None,
     cb_mod=None,
-    llm_tok=None,
-    llm_mod=None,
     faiss_idx=None,
     metadata=None
 ).items():
@@ -39,13 +34,6 @@ def load_codebert():
     return tok, mod
 
 @st.cache_resource
-def load_llm():
-    tok = AutoTokenizer.from_pretrained(MODEL_NAME)
-    mod = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
-    mod.eval()
-    return tok, mod
-
-@st.cache_resource
 def load_faiss():
     p1 = Path("artifacts/faiss_index.bin")
     p2 = Path("artifacts/metadata_store.pkl")
@@ -56,7 +44,7 @@ def load_faiss():
         return idx, meta
     return None, None
 
-# ── CORE FUNCTIONS ─────────────────────────────────────
+# ── CORE ───────────────────────────────────────────────
 def get_embedding(text, tok, mod):
     inputs = tok(text, return_tensors="pt", truncation=True, max_length=512)
     with torch.no_grad():
@@ -78,60 +66,63 @@ def retrieve(query, idx, meta, tok, mod, top_k=3):
             results.append(item)
     return results
 
-def generate(query, snippets, tok, mod):
+def generate(query, snippets):
     context = ""
     for s in snippets:
         context += f"{s['code']}\n"
 
     prompt = f"""
-You are a helpful coding assistant.
+You are an expert AI coding assistant.
 
 Context:
 {context}
 
-Question:
+User Query:
 {query}
 
-Answer:
+Instructions:
+- Give clear answer
+- Provide code if needed
+- Keep concise
 """
 
-    inputs = tok(prompt, return_tensors="pt")
+    response = client.chat.completions.create(
+        model="deepseek/deepseek-coder",  # ✅ DeepSeek via API
+        messages=[
+            {"role": "system", "content": "You are a coding assistant"},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3
+    )
 
-    with torch.no_grad():
-        outputs = mod.generate(
-            input_ids=inputs["input_ids"],
-            max_new_tokens=150
-        )
-
-    answer = tok.decode(outputs[0], skip_special_tokens=True)
-    return answer.strip()
+    return response.choices[0].message.content
 
 # ── UI ────────────────────────────────────────────────
-st.title("🤖 AI Code Assistant")
-st.markdown("### CodeBERT + FAISS + FLAN-T5 (Fast & Stable)")
+st.set_page_config(page_title="AI Code Assistant", page_icon="🤖")
+
+st.title("🤖 AI Code Assistant (DeepSeek + RAG)")
+st.markdown("CodeBERT + FAISS + DeepSeek API")
 
 # Load models
 if not st.session_state.loaded:
     if st.button("🚀 Load Models"):
-        with st.spinner("Loading models..."):
+        with st.spinner("Loading CodeBERT..."):
             st.session_state.cb_tok, st.session_state.cb_mod = load_codebert()
-            st.session_state.llm_tok, st.session_state.llm_mod = load_llm()
+        with st.spinner("Loading FAISS..."):
             st.session_state.faiss_idx, st.session_state.metadata = load_faiss()
-            st.session_state.loaded = True
-        st.success("Models loaded!")
+        st.session_state.loaded = True
+        st.success("Ready!")
         st.rerun()
 
-# Input
 query = st.text_area("Enter your code or question", height=200)
 
-# Generate
 if st.button("⚡ Generate Answer"):
     if not st.session_state.loaded:
-        st.error("Please load models first.")
+        st.error("Load models first")
     elif not query.strip():
-        st.warning("Please enter a question.")
+        st.warning("Enter a question")
     else:
-        with st.spinner("🔍 Retrieving context..."):
+        with st.spinner("🔍 Retrieving..."):
             snippets = retrieve(
                 query,
                 st.session_state.faiss_idx,
@@ -140,18 +131,12 @@ if st.button("⚡ Generate Answer"):
                 st.session_state.cb_mod
             )
 
-        with st.spinner("🧠 Generating answer..."):
-            answer = generate(
-                query,
-                snippets,
-                st.session_state.llm_tok,
-                st.session_state.llm_mod
-            )
+        with st.spinner("🧠 DeepSeek thinking..."):
+            answer = generate(query, snippets)
 
         st.markdown("## ✅ Answer")
         st.write(answer)
 
-        # Save history
         st.session_state.history.append({"q": query, "a": answer})
 
 # History
