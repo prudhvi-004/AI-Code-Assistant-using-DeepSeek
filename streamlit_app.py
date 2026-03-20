@@ -7,13 +7,19 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
 from openai import OpenAI
 
-# ── CONFIG ─────────────────────────────────────────────
+# ── API SETUP ───────────────────────────────────────────
+api_key = st.secrets.get("OPENROUTER_API_KEY")
+
+if not api_key:
+    st.error("❌ API key missing. Add OPENROUTER_API_KEY in Streamlit secrets.")
+    st.stop()
+
 client = OpenAI(
-    api_key=st.secrets["OPENROUTER_API_KEY"],
+    api_key=api_key,
     base_url="https://openrouter.ai/api/v1"
 )
 
-# ── SESSION ────────────────────────────────────────────
+# ── SESSION ─────────────────────────────────────────────
 for k, v in dict(
     loaded=False,
     history=[],
@@ -25,7 +31,7 @@ for k, v in dict(
     if k not in st.session_state:
         st.session_state[k] = v
 
-# ── LOADERS ────────────────────────────────────────────
+# ── LOADERS ─────────────────────────────────────────────
 @st.cache_resource
 def load_codebert():
     tok = AutoTokenizer.from_pretrained("microsoft/codebert-base")
@@ -44,7 +50,7 @@ def load_faiss():
         return idx, meta
     return None, None
 
-# ── CORE ───────────────────────────────────────────────
+# ── CORE FUNCTIONS ─────────────────────────────────────
 def get_embedding(text, tok, mod):
     inputs = tok(text, return_tensors="pt", truncation=True, max_length=512)
     with torch.no_grad():
@@ -72,7 +78,7 @@ def generate(query, snippets):
         context += f"{s['code']}\n"
 
     prompt = f"""
-You are an expert AI coding assistant.
+You are an expert coding assistant.
 
 Context:
 {context}
@@ -87,7 +93,7 @@ Instructions:
 """
 
     response = client.chat.completions.create(
-        model="deepseek/deepseek-coder",  # ✅ DeepSeek via API
+        model="deepseek/deepseek-chat",   # ✅ FIXED MODEL
         messages=[
             {"role": "system", "content": "You are a coding assistant"},
             {"role": "user", "content": prompt}
@@ -97,7 +103,7 @@ Instructions:
 
     return response.choices[0].message.content
 
-# ── UI ────────────────────────────────────────────────
+# ── UI ─────────────────────────────────────────────────
 st.set_page_config(page_title="AI Code Assistant", page_icon="🤖")
 
 st.title("🤖 AI Code Assistant (DeepSeek + RAG)")
@@ -111,7 +117,7 @@ if not st.session_state.loaded:
         with st.spinner("Loading FAISS..."):
             st.session_state.faiss_idx, st.session_state.metadata = load_faiss()
         st.session_state.loaded = True
-        st.success("Ready!")
+        st.success("✅ Ready!")
         st.rerun()
 
 query = st.text_area("Enter your code or question", height=200)
